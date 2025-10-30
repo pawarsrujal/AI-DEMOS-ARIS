@@ -1,0 +1,620 @@
+{
+  "name": "AI Research System (Fixed & Working)",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "hour": 9
+            }
+          ]
+        }
+      },
+      "name": "Daily Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        304,
+        2768
+      ],
+      "id": "b4d89c25-58f5-4115-b303-fd4bc9d414dd"
+    },
+    {
+      "parameters": {
+        "url": "http://export.arxiv.org/api/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "search_query",
+              "value": "cat:cs.AI OR cat:cs.LG OR cat:cs.CV"
+            },
+            {
+              "name": "sortBy",
+              "value": "submittedDate"
+            },
+            {
+              "name": "sortOrder",
+              "value": "descending"
+            },
+            {
+              "name": "max_results",
+              "value": "={{ $('Workflow Configuration').first().json.maxPapers }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "name": "Fetch ArXiv Papers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        752,
+        2768
+      ],
+      "id": "8a6999d9-4cb3-46a7-9415-86c746bf38e5"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse ArXiv Atom/XML response\nconst data = $input.first().json.data;\n\n// Extract entries using regex (more reliable than XML parser)\nconst entryMatches = data.match(/<entry>([\\s\\S]*?)<\\/entry>/g) || [];\n\nif (entryMatches.length === 0) {\n  throw new Error('No papers found in ArXiv response');\n}\n\nconst papers = entryMatches.map(entry => {\n  // Helper to extract tag content\n  const getTag = (tag, content = entry) => {\n    const match = content.match(new RegExp(`<${tag}[^>]*>([\\\\s\\\\S]*?)<\\\\/${tag}>`));\n    return match ? match[1].replace(/<[^>]+>/g, '').trim().replace(/\\s+/g, ' ') : '';\n  };\n  \n  const getId = () => {\n    const id = getTag('id');\n    return id.replace('http://arxiv.org/abs/', '');\n  };\n  \n  const getAuthors = () => {\n    const authorMatches = entry.match(/<author>([\\s\\S]*?)<\\/author>/g) || [];\n    return authorMatches.map(a => getTag('name', a)).filter(n => n).join(', ');\n  };\n  \n  const getCategory = () => {\n    const catMatch = entry.match(/<arxiv:primary_category[^>]*term=\"([^\"]+)\"/);\n    return catMatch ? catMatch[1] : 'cs.AI';\n  };\n  \n  return {\n    id: getId(),\n    title: getTag('title'),\n    summary: getTag('summary'),\n    published: getTag('published').split('T')[0],\n    link: `https://arxiv.org/abs/${getId()}`,\n    pdf_link: `https://arxiv.org/pdf/${getId()}.pdf`,\n    authors: getAuthors(),\n    category: getCategory()\n  };\n});\n\nreturn papers.map(paper => ({ json: paper }));"
+      },
+      "name": "Parse ArXiv XML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        976,
+        2768
+      ],
+      "id": "004907b5-5059-433f-9468-6ad4918cb44c"
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": {
+          "__rl": true,
+          "value": "https://www.notion.so/29be17ae0c8a80249946ed66c65eb618?v=29be17ae0c8a80c7be80000c7008c59d&source=copy_link",
+          "mode": "url"
+        },
+        "title": "={{ $json.title }}",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Authors|rich_text",
+              "type": "rich_text",
+              "textContent": "={{ $json.authors }}"
+            },
+            {
+              "key": "Summary|rich_text",
+              "type": "rich_text",
+              "textContent": "={{ $json.summary }}"
+            },
+            {
+              "key": "Key Insight|rich_text",
+              "type": "rich_text",
+              "textContent": "={{ $json.key_insight }}"
+            },
+            {
+              "key": "Category|select",
+              "type": "select",
+              "selectValue": "={{ $json.category }}"
+            },
+            {
+              "key": "Impact |number",
+              "type": "number",
+              "numberValue": "={{ $json.impact_score }}"
+            },
+            {
+              "key": "Date|date",
+              "type": "date",
+              "date": "={{ $json.published_date }}"
+            },
+            {
+              "key": "Link|url",
+              "type": "url",
+              "urlValue": "={{ $json.arxiv_link }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Save to Notion",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [
+        2448,
+        2576
+      ],
+      "id": "f116f237-802f-4c65-9f29-24c499adf51a",
+      "credentials": {
+        "notionApi": {
+          "id": "auOh5ODihaNIZm5a",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "daivik.hirpara@gmail.com",
+        "subject": "=🧠 AI Research Digest - {{ new Date().toLocaleDateString() }}",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "name": "Send Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3120,
+        2864
+      ],
+      "id": "fa4b2846-7951-4c94-98f1-5bd304a3bbda",
+      "webhookId": "92604c6a-b43f-4138-b80c-88009f2d71cf",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "nPQOz0fTJAkeJ2Zf",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-flash-latest",
+          "mode": "id"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze this research paper and provide:\n\n**Title:** {{ $('Parse ArXiv XML').item.json.title }}\n\n**Abstract:** {{ $('Parse ArXiv XML').item.json.summary }}\n\n**Category:** {{ $('Parse ArXiv XML').item.json.category }}\n\nRespond STRICTLY in this JSON format:\n{\n  \"summary\": \"3 concise bullet points summarizing method, results, and significance.\",\n  \"keyInsight\": \"1 sentence about practical applications.\",\n  \"category\": \"One of: Reinforcement Learning, Computer Vision, Machine Learning, NLP, Other\",\n  \"impactScore\": \"1-10 integer\"\n}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {}
+      },
+      "id": "3f8a8757-478c-4df1-85f7-cf11c304c76a",
+      "name": "Analyze with Gemini",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        1424,
+        2768
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "q29bKqleKbPrkALe",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const geminiResponse = $json.content?.parts?.[0]?.text || $json.message || JSON.stringify($json); const originalPaper = $('Parse ArXiv XML').item.json; let analysis; try { const cleanedResponse = geminiResponse.replace(/```json\\n?|```\\n?/g, '').trim(); analysis = JSON.parse(cleanedResponse); } catch (e) { analysis = { summary: 'Analysis pending', keyInsight: 'Analysis pending', category: originalPaper.category, impactScore: 5 }; } const output = { title: originalPaper.title, arxiv_id: originalPaper.id, authors: originalPaper.authors, abstract: originalPaper.summary.substring(0, 1000), summary: Array.isArray(analysis.summary) ? analysis.summary.join(' ') : (analysis.summary || 'Analysis pending'), key_insight: analysis.keyInsight || 'Analysis pending', category: analysis.category || originalPaper.category, impact_score: parseInt(analysis.impactScore) || 5, published_date: originalPaper.published, arxiv_link: originalPaper.link, pdf_link: originalPaper.pdf_link, raw_category: originalPaper.category }; return { json: output };"
+      },
+      "id": "229fd5ba-d580-48f6-a431-163fea0db9c7",
+      "name": "Format Analysis Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        2768
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "minImpactScore",
+              "value": 6,
+              "type": "number"
+            },
+            {
+              "id": "id-2",
+              "name": "maxPapers",
+              "value": 5,
+              "type": "number"
+            },
+            {
+              "id": "id-3",
+              "name": "slackChannel",
+              "value": "#research-alerts",
+              "type": "string"
+            },
+            {
+              "id": "id-4",
+              "name": "notionDatabaseId",
+              "value": "29be17ae0c8a80249946ed66c65eb618",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "ba6b0f3b-9a9c-4393-a8bd-3cb036f6b488",
+      "name": "Workflow Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        528,
+        2768
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.semanticscholar.org/graph/v1/paper/arXiv:{{ $json.arxiv_id }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "citationCount,influentialCitationCount,year"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "15ab4611-5408-42da-8e85-a8037448a884",
+      "name": "Fetch Citation Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2000,
+        2768
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const paper = $('Format Analysis Results').item.json; const citations = $json.citationCount || 0; const influential = $json.influentialCitationCount || 0; return { json: { ...paper, citation_count: citations, influential_citations: influential } };"
+      },
+      "id": "13ba7a7f-8516-4787-9186-bb61246e08a9",
+      "name": "Merge Citations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2224,
+        2768
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "value": "U09PH0L9WE9",
+          "mode": "list",
+          "cachedResultName": "daivikwork99"
+        },
+        "text": "=:fire: *High-Impact Paper Alert!*\n\n*{{ $json.title }}*\n\n:star: Impact Score: *{{ $json.impact_score }}/10*\n:chart_with_upwards_trend: Citations: {{ $json.citation_count }}\n:bulb: {{ $json.key_insight }}\n\n<{{ $json.arxiv_link }}|Read Paper>",
+        "otherOptions": {}
+      },
+      "id": "a25c0f9d-4d0d-4ec6-9bdc-702fdddc8c90",
+      "name": "Alert High Impact on Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        2448,
+        2768
+      ],
+      "webhookId": "871dfde9-0788-4268-82b0-f92869855d32",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "5FKlgLFqprcspqG1",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "fa23b315-1872-4b9c-9ec4-bc8471ab7388",
+      "name": "Aggregate Papers",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        2448,
+        2960
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.all();\nlet papers = [];\n\n// Flatten all papers from the \"data\" arrays\ninput.forEach(i => {\n  if (Array.isArray(i.json.data)) {\n    papers = papers.concat(i.json.data);\n  }\n});\n\nconst totalPapers = papers.length;\nconst avgImpactScore = Math.round(papers.reduce((sum, p) => sum + (p.impact_score || 0), 0) / totalPapers);\n\n// Category distribution\nconst categoryCount = {};\npapers.forEach(p => {\n  const cat = p.category || 'Other';\n  categoryCount[cat] = (categoryCount[cat] || 0) + 1;\n});\n\n// Impact score distribution\nconst highImpact = papers.filter(p => (p.impact_score || 0) >= 8).length;\nconst mediumImpact = papers.filter(p => (p.impact_score || 0) >= 5 && (p.impact_score || 0) < 8).length;\nconst lowImpact = papers.filter(p => (p.impact_score || 0) < 5).length;\n\n// Top papers\nconst topPapers = papers\n  .sort((a, b) => (b.impact_score || 0) - (a.impact_score || 0))\n  .slice(0, 3)\n  .map(p => ({\n    title: p.title,\n    impactScore: p.impact_score,\n    category: p.category,\n    keyInsight: p.key_insight\n  }));\n\n// Category trends\nconst topCategories = Object.entries(categoryCount)\n  .sort((a, b) => b[1] - a[1])\n  .slice(0, 3)\n  .map(([category, count]) => ({ category, count }));\n\n// Author analysis\nconst authorCount = {};\npapers.forEach(p => {\n  if (p.authors) {\n    p.authors.split(',').map(a => a.trim()).forEach(author => {\n      authorCount[author] = (authorCount[author] || 0) + 1;\n    });\n  }\n});\n\nconst topAuthors = Object.entries(authorCount)\n  .sort((a, b) => b[1] - a[1])\n  .slice(0, 5)\n  .map(([author, count]) => ({ author, count }));\n\n// Trends and insights\nconst trends = [];\nif (highImpact > totalPapers * 0.3) {\n  trends.push(`🔥 High activity: ${highImpact} high-impact papers (${Math.round(highImpact / totalPapers * 100)}%)`);\n}\nif (topCategories.length > 0) {\n  trends.push(`📈 Trending: ${topCategories[0].category} leads with ${topCategories[0].count} papers`);\n}\nif (topAuthors.length > 0 && topAuthors[0].count > 1) {\n  trends.push(`👤 Prolific author: ${topAuthors[0].author} (${topAuthors[0].count} papers)`);\n}\n\n// Final output\nreturn [{\n  json: {\n    summary: { totalPapers, avgImpactScore, highImpact, mediumImpact, lowImpact },\n    categoryDistribution: categoryCount,\n    topCategories,\n    topPapers,\n    topAuthors,\n    trends,\n    papers\n  }\n}];\n"
+      },
+      "id": "3f2b8a0d-0454-4af7-91e1-c0b0a7e9ffbd",
+      "name": "Generate Trends & Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2672,
+        2960
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate advanced HTML email with trends, citations, and comprehensive statistics\nconst stats = $input.first().json;\nconst papers = stats.papers || [];\nconst date = new Date().toLocaleDateString('en-US', { \n  weekday: 'long',\n  year: 'numeric', \n  month: 'long', \n  day: 'numeric' \n});\n\nlet html = `<!DOCTYPE html>\n<html>\n<head>\n  <meta charset='UTF-8'>\n  <meta name='viewport' content='width=device-width, initial-scale=1.0'>\n  <style>\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body {\n      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;\n      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);\n      padding: 20px;\n      line-height: 1.6;\n    }\n    .container {\n      max-width: 1000px;\n      margin: 0 auto;\n      background: white;\n      border-radius: 12px;\n      box-shadow: 0 20px 60px rgba(0,0,0,0.3);\n      overflow: hidden;\n    }\n    .header {\n      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);\n      color: white;\n      padding: 40px 30px;\n      text-align: center;\n    }\n    .header h1 { font-size: 32px; margin-bottom: 10px; font-weight: 700; }\n    .header p { font-size: 16px; opacity: 0.95; }\n    .content { padding: 30px; }\n    .stats-grid {\n      display: grid;\n      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));\n      gap: 20px;\n      margin-bottom: 30px;\n    }\n    .stat-card {\n      background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);\n      padding: 25px;\n      border-radius: 10px;\n      text-align: center;\n      box-shadow: 0 4px 12px rgba(0,0,0,0.1);\n      transition: transform 0.2s;\n    }\n    .stat-card:hover { transform: translateY(-5px); }\n    .stat-number { font-size: 42px; font-weight: 700; color: #667eea; display: block; margin-bottom: 8px; }\n    .stat-label { color: #718096; font-size: 14px; font-weight: 500; }\n    .trends-section {\n      background: linear-gradient(135deg, #fff5f5 0%, #ffe5e5 100%);\n      border-left: 4px solid #f56565;\n      padding: 20px;\n      margin: 25px 0;\n      border-radius: 8px;\n    }\n    .trends-section h2 { color: #c53030; font-size: 20px; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; }\n    .trend-item { padding: 10px 0; color: #2d3748; font-size: 15px; border-bottom: 1px solid rgba(0,0,0,0.05); }\n    .trend-item:last-child { border-bottom: none; }\n    .top-papers { margin: 30px 0; }\n    .top-papers h2 { color: #2d3748; font-size: 24px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }\n    .paper {\n      background: #f8f9fa;\n      border-left: 4px solid #667eea;\n      padding: 24px;\n      margin: 20px 0;\n      border-radius: 8px;\n      transition: transform 0.2s, box-shadow 0.2s;\n    }\n    .paper:hover { transform: translateX(5px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }\n    .paper-title { color: #2d3748; font-size: 18px; font-weight: 600; margin-bottom: 12px; line-height: 1.4; }\n    .paper-meta { color: #718096; font-size: 14px; margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 15px; }\n    .meta-item { display: flex; align-items: center; gap: 5px; }\n    .insight-box { background: linear-gradient(135deg, #e0e7ff 0%, #f3e8ff 100%); border-left: 3px solid #667eea; padding: 15px; margin: 15px 0; border-radius: 6px; }\n    .insight-box strong { color: #4c51bf; display: block; margin-bottom: 8px; }\n    .paper-links { margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap; }\n    .btn { display: inline-block; padding: 10px 20px; background: #667eea; color: white; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight: 500; transition: background 0.3s; }\n    .btn:hover { background: #5568d3; }\n    .btn-pdf { background: #f56565; }\n    .btn-pdf:hover { background: #e53e3e; }\n    .authors-section {\n      background: linear-gradient(135deg, #e6fffa 0%, #b2f5ea 100%);\n      padding: 20px;\n      border-radius: 8px;\n      margin: 25px 0;\n    }\n    .authors-section h3 { color: #234e52; margin-bottom: 15px; }\n    .author-list { display: flex; flex-wrap: wrap; gap: 10px; }\n    .author-badge {\n      background: white;\n      padding: 8px 15px;\n      border-radius: 20px;\n      font-size: 14px;\n      color: #2d3748;\n      box-shadow: 0 2px 4px rgba(0,0,0,0.1);\n    }\n    .footer { text-align: center; padding: 20px; color: #718096; font-size: 14px; background: #f7fafc; }\n  </style>\n</head>\n<body>\n  <div class='container'>\n    <div class='header'>\n      <h1>🧠 AI Research Intelligence Digest</h1>\n      <p>📅 ${date}</p>\n    </div>\n    <div class='content'>\n      <div class='stats-grid'>\n        <div class='stat-card'>\n          <span class='stat-number'>${stats.summary.totalPapers}</span>\n          <div class='stat-label'>Papers Analyzed</div>\n        </div>\n        <div class='stat-card'>\n          <span class='stat-number'>${stats.summary.avgImpactScore}</span>\n          <div class='stat-label'>Avg Impact Score</div>\n        </div>\n        <div class='stat-card'>\n          <span class='stat-number'>${stats.summary.highImpact}</span>\n          <div class='stat-label'>High Impact (8+)</div>\n        </div>\n        <div class='stat-card'>\n          <span class='stat-number'>${stats.topCategories.length}</span>\n          <div class='stat-label'>Active Categories</div>\n        </div>\n      </div>`;\n\n// ✅ Keep trends, papers, authors — remove analytics chart part\nif (stats.trends?.length) {\n  html += `\n      <div class='trends-section'>\n        <h2>🔥 Key Trends & Insights</h2>`;\n  stats.trends.forEach(trend => html += `<div class='trend-item'>${trend}</div>`);\n  html += `</div>`;\n}\n\nif (stats.topPapers?.length) {\n  html += `<div class='top-papers'><h2>⭐ Top ${stats.topPapers.length} High-Impact Papers</h2>`;\n  stats.topPapers.forEach((p, i) => {\n    const full = papers.find(x => x.title === p.title) || {};\n    const authorList = (full.authors || '').split(',').slice(0,3).join(',');\n    html += `\n    <div class='paper'>\n      <div class='paper-title'>${i+1}. ${p.title}</div>\n      <div class='paper-meta'>\n        <div class='meta-item'>👥 ${authorList}</div>\n        <div class='meta-item'>🏷️ ${p.category}</div>\n        <div class='meta-item'>⭐ Impact: ${p.impactScore}/10</div>\n      </div>\n      <div class='insight-box'><strong>💡 Key Insight</strong>${p.keyInsight}</div>\n      <div class='paper-links'>\n        <a href='${full.arxiv_link || \"#\"}' class='btn'>📄 Read Abstract</a>\n        <a href='${full.pdf_link || \"#\"}' class='btn btn-pdf'>📥 Download PDF</a>\n      </div>\n    </div>`;\n  });\n  html += `</div>`;\n}\n\nif (stats.topAuthors?.length) {\n  html += `<div class='authors-section'><h3>👤 Most Prolific Authors</h3><div class='author-list'>`;\n  stats.topAuthors.forEach(a => html += `<div class='author-badge'>${a.author} (${a.count})</div>`);\n  html += `</div></div>`;\n}\n\nhtml += `\n    </div>\n    <div class='footer'>\n      ✨ Generated by AI Research Intelligence System | Powered by ArXiv, Google Gemini & Semantic Scholar\n    </div>\n  </div>\n</body>\n</html>`;\n\nreturn [{ json: { html } }];\n"
+      },
+      "id": "e3269eef-6a64-4214-8816-1f9a079a91eb",
+      "name": "Generate Advanced Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2896,
+        2864
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 7
+      },
+      "id": "2314f8f2-5717-4e7f-a372-9de2567dc375",
+      "name": "Rate Limit Delay",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        2768
+      ],
+      "webhookId": "1ba118d3-1f18-4e20-bc90-47332e5e7aa3"
+    },
+    {
+      "parameters": {
+        "from": "+12279990863",
+        "to": "+918140216155",
+        "message": "={{ $json.message }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        3120,
+        3056
+      ],
+      "id": "2087ad99-83bf-43b8-9a9b-2d397066598c",
+      "name": "Send an SMS/MMS/WhatsApp message",
+      "credentials": {
+        "twilioApi": {
+          "id": "cJyyZwghCdLT3Bgy",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst topPaper = items[0].json.topPapers[0];\n\nlet msg = `*🔥 Top AI Research Paper*\\n\\n`;\nmsg += `*${topPaper.title}*\\n`;\n\nmsg += `📄 PDF: ${items[0].json.papers[0].pdf_link}`;\n\nreturn [{ json: { message: msg.trim() } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2896,
+        3056
+      ],
+      "id": "5a4d335e-bd5c-4a7c-a03d-ad74f4ea8dde",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "content": "| **Node** |  **Description** |\n|:---------------------------|:--------------------------------------------------------------|\n| **Daily Trigger** | Starts automatically every morning — no manual work required. |\n| **Workflow Configuration** | Defines categories, filters, and API parameters for fetching papers. |\n| **Fetch ArXiv Papers** | Retrieves the latest research papers directly from ArXiv API. |\n| **Parse ArXiv XML** | Converts raw XML into clean, structured JSON for easier analysis. |\n| **Rate Limit Delay** | Adds controlled delay to prevent API rate limit issues. |\n| **Analyze with Gemini** | Uses Gemini AI to analyze abstracts, extract insights, and rate impact. |\n| **Format Analysis Results** | Standardizes and refines AI outputs into structured fields. |\n| **Fetch Citation Data** | Collects citation counts and influence metrics from Semantic Scholar. |\n| **Merge Citations** | Combines AI insights and citations into one comprehensive dataset. |\n| **Save to Notion** | Stores all insights into Notion — your digital research archive. |\n| **Alert High Impact on Slack** | Sends real-time alerts for top-impact papers via Slack. |\n| **Aggregate Papers** | Groups daily papers for generating summaries and trends. |\n| **Generate Trends & Stats** | Calculates total papers, average impact, and top research categories. |\n| **Generate Advanced Email** | Creates a rich HTML email digest with summaries and links. |\n| **Send Email** | Automatically delivers the research digest to your inbox. |\n| **Code in JavaScript** | Formats a concise version for WhatsApp/SMS updates. |\n| **Send SMS/WhatsApp** | Sends paper highlights directly to your phone for quick access. |\n",
+        "height": 576,
+        "width": 608,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1568,
+        2128
+      ],
+      "typeVersion": 1,
+      "id": "68901ad9-64be-42a8-a7f2-2f1472123851",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "# ARIS – Artificial Research Intelligence System\n\n",
+        "height": 80,
+        "width": 768,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        576,
+        2592
+      ],
+      "typeVersion": 1,
+      "id": "60cdab56-fbcf-4b48-b898-3a11beacbfc5",
+      "name": "Sticky Note1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Fetch ArXiv Papers": {
+      "main": [
+        [
+          {
+            "node": "Parse ArXiv XML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze with Gemini": {
+      "main": [
+        [
+          {
+            "node": "Format Analysis Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Configuration": {
+      "main": [
+        [
+          {
+            "node": "Fetch ArXiv Papers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Analysis Results": {
+      "main": [
+        [
+          {
+            "node": "Fetch Citation Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Citation Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Citations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Citations": {
+      "main": [
+        [
+          {
+            "node": "Alert High Impact on Slack",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Aggregate Papers",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save to Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Papers": {
+      "main": [
+        [
+          {
+            "node": "Generate Trends & Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Trends & Stats": {
+      "main": [
+        [
+          {
+            "node": "Generate Advanced Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Advanced Email": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Trigger": {
+      "main": [
+        [
+          {
+            "node": "Workflow Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse ArXiv XML": {
+      "main": [
+        [
+          {
+            "node": "Rate Limit Delay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rate Limit Delay": {
+      "main": [
+        [
+          {
+            "node": "Analyze with Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Send an SMS/MMS/WhatsApp message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Notion": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "92978be7-2690-4d82-a657-41c2d8fa914d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f184180350932c5b28da5939d65f90a33c88779b97fda49ef4fef98c71bb1446"
+  },
+  "id": "pdR2H8zIBGA19zkK",
+  "tags": []
+}
